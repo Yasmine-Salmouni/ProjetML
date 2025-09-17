@@ -39,11 +39,6 @@ GIF-7005/
    # Pour activer la synchronisation entre .ipynb et .py
    jupytext --set-formats ipynb,py notebooks/nom_du_notebook.ipynb
 
-   # Pour convertir un notebook existant en script Python
-   jupytext --convert notebooks/nom_du_notebook.ipynb --to py
-
----
-
 ### Option 2 : avec un environnement virtuel Python (venv + pip)
 
 1. Cloner le dépôt :
@@ -68,8 +63,6 @@ GIF-7005/
 4. Synchroniser les notebooks avec Jupytext :
 
    jupytext --set-formats ipynb,py notebooks/nom_du_notebook.ipynb
-   jupytext --convert notebooks/nom_du_notebook.ipynb --to py
-
 
 ## Données
 

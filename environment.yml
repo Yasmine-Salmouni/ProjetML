@@ -1,0 +1,18 @@
+name: gif7005-env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - jupyterlab
+  - notebook
+  - ipykernel
+  - numpy
+  - pandas
+  - matplotlib
+  - scikit-learn
+  - seaborn
+  - pip
+  - pip:
+      - jupytext
+      - nbstripout
