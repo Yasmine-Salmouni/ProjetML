@@ -9,12 +9,41 @@ def yyqq_to_date(yyqq):
     return pd.Timestamp(year=year, month=month, day=1)
 
 def create_loan_date_column(data):
+    data = data.copy()
+
     data["Origination_date"] = data["Loanref"].apply(yyqq_to_date)
     return data
+
+def to_float64(data):
+    data = data.copy()
+
+    exclude = ["Origination_date"]
+
+    for col in data.columns:
+        if col not in exclude:
+            data[col] = pd.to_numeric(data[col], errors='coerce').astype('float64')
+
+    return data
+
+def round_float64(data, n_decimales=4):
+    data = data.copy()
+    float_cols = data.select_dtypes(include='float64').columns
+    data[float_cols] = data[float_cols].round(n_decimales)
+    return data
+
+
 
 def preprocess(data):
     data = create_loan_date_column(data)
     data = data.sort_values("Origination_date")
+
+    data = to_float64(data)
+
+    for col in ["CLoan_to_value", "OLoan_to_value"]:
+        if col in data.columns:
+            data[col] = data[col] / 100.0
+
+    data = round_float64(data)
 
     keep_colnames = [
         "Origination_date", "Credit_Score", "Mortgage_Insurance", "Number_of_units",

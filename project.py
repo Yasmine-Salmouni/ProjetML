@@ -52,13 +52,16 @@ from preprocess import *
 # ## Prétraitement des données
 
 # %%
-process_and_save_all(PROJECT_PATH, windows=["FM12"])
+process_and_save_all(PROJECT_PATH, windows=["FM12"], segments=["red"])
 
 # %% [markdown]
 # ## Importation des données prétraitées
 
 # %%
-data = load_processed_data(PROJECT_PATH, windows=["FM12"])
+data_train = load_processed_data(PROJECT_PATH, windows=["FM12"], segments=['red'], splits=["train"])
+X_train, y_train = data_train.drop(columns=['DFlag']),data_train['DFlag']
+data_test = load_processed_data(PROJECT_PATH, windows=["FM12"], segments=['red'], splits=["OOS"])
+X_test, y_test = data_test.drop(columns=['DFlag']), data_test['DFlag']
 
 # %% [markdown]
 # ## Exploration des données
@@ -68,4 +71,5 @@ from explore_data import *
 
 save_path = os.path.join(PROJECT_PATH, "outputs", "exploration", "rapport_FM12.html")
 
-summarize_data_to_html(data, "FM12 - Rapport", save_path)
+data_to_explore = load_processed_data(PROJECT_PATH, windows=["FM12"], segments=['red'])
+summarize_data_to_html(data_to_explore, "FM12 - Rapport", save_path)
