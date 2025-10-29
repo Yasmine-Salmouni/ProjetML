@@ -32,9 +32,23 @@ def impute_missing_data(data):
     return cleaned_df
 
 def preprocess(data):
+    keep_colnames = [
+        "Loanref", "Credit_Score", "Mortgage_Insurance", "Number_of_units",
+        "CLoan_to_value", "Debt_to_income", "OLoan_to_value",
+        "Single_borrower",
+        "is_Loan_purpose_purc", "is_Loan_purpose_cash", "is_Loan_purpose_noca",
+        "is_First_time_homeowner", "is_First_time_homeowner_No",
+        "is_Occupancy_status_prim", "is_Occupancy_status_inve", "is_Occupancy_status_seco",
+        "is_Origination_channel_reta", "is_Origination_channel_brok", "is_Origination_channel_corr", "is_Origination_channel_tpo",
+        "is_Property_type_cond", "is_Property_type_coop", "is_Property_type_manu",
+        "is_Property_type_pud", "is_Property_type_sing",
+        "DFlag"
+    ]
+    data = data[keep_colnames]
     data = data.copy()
     data = create_loan_date_column(data)
     data = data.sort_values("Origination_date")
+    data = data.drop(columns=['Loanref'])
 
     data = to_float64(data)
 
@@ -46,20 +60,7 @@ def preprocess(data):
 
     data = impute_missing_data(data)
 
-    keep_colnames = [
-        "Origination_date", "Credit_Score", "Mortgage_Insurance", "Number_of_units",
-        "CLoan_to_value", "Debt_to_income", "OLoan_to_value",
-        "Single_borrower",
-        "is_Loan_purpose_purc", "is_Loan_purpose_cash", "is_Loan_purpose_noca",
-        "is_First_time_homeowner", "is_First_time_homeowner_No",
-        "is_Occupancy_status_prim", "is_Occupancy_status_inve", "is_Occupancy_status_seco",
-        "is_Origination_channel_reta", "is_Origination_channel_brok", "is_Origination_channel_corr", "is_Origination_channel_tpo",
-        "is_Property_type_cond", "is_Property_type_coop", "is_Property_type_manu",
-        "is_Property_type_pud", "is_Property_type_sing",
-        "DFlag"
-    ]
-
-    return data[keep_colnames]
+    return data
 
 def process_and_save_all(project_path, windows=["FM12", "FM24", "FM36", "FM48", "FM60"], segments=["green", "red"], splits=["train", "OOS", "OOT", "OOU"]):
     for window in windows:
