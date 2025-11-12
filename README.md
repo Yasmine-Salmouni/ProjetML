@@ -1,4 +1,8 @@
-# Projet GIF-7005 – Équipe 12 (Session A25)
+# **Projet GIF-7005 – Équipe 12 (Session A25)**
+![Pipeline](https://img.shields.io/badge/pipeline-passed-brightgreen?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python)
+![Status](https://img.shields.io/badge/status-active-brightgreen?style=flat-square)
+![Last Commit](https://img.shields.io/github/last-commit/AlisonOuellet/GenomicResistancePreditor?style=flat-square)
 
 Ce dépôt contient le projet de session réalisé par l'équipe 12 dans le cadre du cours GIF-7005.
 
