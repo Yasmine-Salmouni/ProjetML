@@ -19,13 +19,13 @@ Ce dépôt contient le projet de session réalisé par l'équipe 12 dans le cadr
 
 ---
 
-## Objectif du projet
+## Objectif
 
 À déterminer
 
 ---
 
-## Structure du projet
+## Structure
 ```
 GIF-7005/
 ├── /         # Notebooks Jupyter collaboratifs pour exploration et prototypage
@@ -39,7 +39,7 @@ GIF-7005/
 └── README.md          # Documentation du projet
 ```
 ---
-## Démarrage rapide
+## Démarrage
 
 ### Option 1 : installation avec Conda
 
