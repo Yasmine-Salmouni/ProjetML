@@ -9,9 +9,9 @@ Ce dépôt contient le projet de session réalisé par l'équipe 12 dans le cadr
 ---
 
 ### Table of Contents
-1. [Objectif du projet](#objectif)
-2. [Structure du projet](#structure)
-3. [Démarrage rapide](#demarrage)
+1. [Objectif du projet](#Objectif_du_projet)
+2. [Structure du projet](#Structure_du_projet)
+3. [Démarrage rapide](#Démarrage_rapide)
 4. [Données](#Données)
 5. [Modèles](#Modèles)
 6. [Collaboration](#collaboration)
