@@ -22,17 +22,18 @@ Ce dépôt contient le projet de session réalisé par l'équipe 12 dans le cadr
 À déterminer
 
 ## Structure du projet
-
+```
 GIF-7005/
 ├── /         # Notebooks Jupyter collaboratifs pour exploration et prototypage
 ├── src/               # Code Python modulaire (fonctions, classes, pipelines)
 ├── data/
 │   ├── raw/           # Données brutes (non modifiées)
-│   ├── processed/     # Données nettoyées et prêtes pour l'entraînement
+│   └── processed/     # Données nettoyées et prêtes pour l'entraînement
 ├── models/            # Modèles entraînés (.pkl, .pt, etc.)
 ├── outputs/           # Graphiques, résultats, logs d'expériences
 ├── environment.yml    # Dépendances Conda pour reproduire l'environnement
-├── README.md          # Documentation du projet
+└── README.md          # Documentation du projet
+```
 
 ## Démarrage rapide
 
