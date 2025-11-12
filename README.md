@@ -6,6 +6,17 @@
 
 Ce dépôt contient le projet de session réalisé par l'équipe 12 dans le cadre du cours GIF-7005.
 
+---
+
+### Table of Contents
+1. [Objectif du projet](#objectif)
+2. [Structure du projet](#structure)
+3. [Démarrage rapide](#demarrage)
+4. [Données](#donnees)
+5. [Collaboration](#collaboration)
+6. [Convention de commit des notebooks avec Jupytext](#notebook)
+
+
 ## Objectif du projet
 
 À déterminer
