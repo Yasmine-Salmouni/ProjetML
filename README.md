@@ -13,7 +13,7 @@ Ce dépôt contient le projet de session réalisé par l'équipe 12 dans le cadr
 2. [Structure du projet](#structure)
 3. [Démarrage rapide](#demarrage)
 4. [Données](#Données)
-5. [Modèles](#modeles)
+5. [Modèles](#Modèles)
 6. [Collaboration](#collaboration)
 7. [Convention de commit des notebooks avec Jupytext](#notebook)
 
