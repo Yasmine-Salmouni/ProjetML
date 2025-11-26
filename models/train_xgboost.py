@@ -232,10 +232,16 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     return model
 
 if __name__ == "__main__":
-    # Entraîner le modèle
-    model = train_xgboost_model(
-        project_path=PROJECT_PATH,
-        window="FM12",
-        segments=["green", "red"]
-    )
+    # Entraîner les modèles pour FM12, FM36 et FM60
+    windows = ["FM12", "FM36", "FM60"]
+    
+    for window in windows:
+        print(f"\n{'='*80}")
+        print(f"ENTRAÎNEMENT DU MODÈLE POUR {window}")
+        print(f"{'='*80}\n")
+        model = train_xgboost_model(
+            project_path=PROJECT_PATH,
+            window=window,
+            segments=["green", "red"]
+        )
 

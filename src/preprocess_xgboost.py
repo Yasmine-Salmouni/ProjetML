@@ -299,13 +299,13 @@ def preprocess_xgboost(data, target_col='DFlag'):
     return data
 
 
-def process_and_save_all(project_path, windows=["FM12"], segments=["green", "red"], splits=["train", "OOS", "OOT", "OOU"]):
+def process_and_save_all(project_path, windows=["FM12", "FM36", "FM60"], segments=["green", "red"], splits=["train", "OOS", "OOT", "OOU"]):
     """
     Traite et sauvegarde tous les fichiers spécifiés
     
     Args:
         project_path: Chemin du projet
-        windows: Liste des fenêtres (ex: ["FM12"])
+        windows: Liste des fenêtres (ex: ["FM12", "FM36", "FM60"])
         segments: Liste des segments (ex: ["green", "red"])
         splits: Liste des splits (ex: ["train", "OOS", "OOT", "OOU"])
     """
@@ -392,7 +392,7 @@ def process_and_save_all(project_path, windows=["FM12"], segments=["green", "red
                     print(f"  Fichier introuvable : {raw_path}")
 
 
-def load_processed_data(project_path, windows=["FM12"], segments=["green", "red"], splits=["train", "OOS", "OOT", "OOU"]):
+def load_processed_data(project_path, windows=["FM12", "FM36", "FM60"], segments=["green", "red"], splits=["train", "OOS", "OOT", "OOU"]):
     """
     Charge les données prétraitées (gère les gros fichiers par chunks)
     
@@ -437,9 +437,9 @@ def load_processed_data(project_path, windows=["FM12"], segments=["green", "red"
                                 dataframes.append(df)
                                 print(f"  Chargé : {file_path} ({df.shape[0]} lignes)")
                             else:
-                                print(f"  ⚠️  Fichier vide : {file_path}")
+                                print(f"  Fichier vide : {file_path}")
                         except Exception as e2:
-                            print(f"  ❌ Erreur lors de la lecture par chunks : {str(e2)}")
+                            print(f"  Erreur lors de la lecture par chunks : {str(e2)}")
                             print(f"     Le fichier est peut-être corrompu ou trop volumineux pour la mémoire disponible")
                             raise
                 else:
