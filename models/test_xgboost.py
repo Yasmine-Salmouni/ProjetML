@@ -75,6 +75,10 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
             files_to_load.append(file_path)
     
     if not files_to_load:
+        # Pour OOU, il se peut que les fichiers n'existent que pour certaines fenêtres (ex: seulement FM12)
+        if test_split == "OOU":
+            print(f"  Attention : Aucune donnée OOU trouvée pour {window}.")
+            print(f"  Note : Les données OOU peuvent n'être disponibles que pour certaines fenêtres (ex: FM12 uniquement).")
         raise ValueError(
             f"Aucune donnée de test {test_split} trouvée dans data/processed/{window}/!\n"
             f"Assurez-vous d'avoir exécuté le prétraitement avec run_preprocessing.py"

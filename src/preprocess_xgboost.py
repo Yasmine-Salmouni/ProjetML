@@ -326,35 +326,49 @@ def process_and_save_all(project_path, windows=["FM12", "FM36", "FM60"], segment
                     print(f"{'='*80}")
                     
                     try:
+                        # Créer le dossier de destination
+                        save_dir = os.path.join(project_path, "data", "processed", window, segment)
+                        os.makedirs(save_dir, exist_ok=True)
+                        save_filename = f"{split}_{window[2:]}.csv"
+                        save_path = os.path.join(save_dir, save_filename)
+                        
                         # Lire le fichier
                         if split == "OOU":
-                            # Essayer de lire le fichier SAS
+                            # Lire le fichier SAS avec pandas uniquement
+                            print("  Lecture du fichier SAS (.sas7bdat) avec pandas...")
                             try:
+                                # Utiliser pd.read_sas() de pandas pour lire le fichier SAS
+                                # Note: pd.read_sas() nécessite la bibliothèque sas7bdat (pip install sas7bdat)
                                 df = pd.read_sas(raw_path, encoding="utf-8")
+                                print(f"  Fichier SAS lu avec succès : {df.shape[0]} lignes, {df.shape[1]} colonnes")
+                                
+                                # Convertir en DataFrame pandas si nécessaire
+                                if not isinstance(df, pd.DataFrame):
+                                    df = pd.DataFrame(df)
+                                
+                                # Prétraiter les données OOU
+                                print("  Prétraitement des données OOU...")
+                                df_processed = preprocess_xgboost(df, target_col='DFlag')
+                                
+                                # Sauvegarder le fichier prétraité
+                                print(f"  Sauvegarde du fichier prétraité...")
+                                df_processed.to_csv(save_path, index=False)
+                                print(f"  Sauvegardé : {save_path} ({df_processed.shape[0]} lignes)")
+                                
+                            except ImportError as e:
+                                print(f"  Erreur : La bibliothèque sas7bdat est requise pour lire les fichiers .sas7bdat")
+                                print(f"  Installation : pip install sas7bdat")
+                                raise ImportError("sas7bdat est requis pour lire les fichiers .sas7bdat avec pandas. Installez-le avec: pip install sas7bdat")
                             except Exception as e:
-                                # Si pandas.read_sas ne fonctionne pas, essayer pyreadstat
-                                try:
-                                    import pyreadstat
-                                    df, meta = pyreadstat.read_sas7bdat(raw_path)
-                                except ImportError:
-                                    print(f"  Impossible de lire le fichier SAS. Installez pyreadstat: pip install pyreadstat")
-                                    raise e
+                                print(f"  Erreur lors de la lecture du fichier SAS : {str(e)}")
+                                print(f"  Assurez-vous que la bibliothèque sas7bdat est installée : pip install sas7bdat")
+                                import traceback
+                                traceback.print_exc()
+                                raise
                         else:
-                            # Lire par chunks pour gérer les gros fichiers
+                            # Lire par chunks pour gérer les gros fichiers CSV
                             print("  Lecture par chunks (fichier volumineux)...")
                             chunk_size = 50000  # Nombre de lignes par chunk
-                            
-                            # Créer le dossier de destination
-                            save_dir = os.path.join(project_path, "data", "processed", window, segment)
-                            os.makedirs(save_dir, exist_ok=True)
-                            
-                            # Nom du fichier de sortie
-                            if split == "OOU":
-                                save_filename = f"{split}_{window[2:]}.csv"
-                            else:
-                                save_filename = f"{split}_{window[2:]}.csv"
-                            
-                            save_path = os.path.join(save_dir, save_filename)
                             
                             # Lire et traiter par chunks
                             first_chunk = True
