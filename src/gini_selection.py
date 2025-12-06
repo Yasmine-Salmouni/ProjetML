@@ -1,206 +1,361 @@
 """
-Module pour la sélection de variables basée sur le coefficient de Gini
-Peut être utilisé avec n'importe quel pipeline de prétraitement
+Script de sélection de caractéristiques basée sur l'impureté de Gini
+Utilise l'importance Gini d'un modèle XGBoost pour sélectionner les caractéristiques les plus pertinentes
 """
 
 import os
+import sys
 import pandas as pd
 import numpy as np
+import xgboost as xgb
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.feature_selection import SelectFromModel
+import warnings
+warnings.filterwarnings('ignore')
 
-def calculate_gini_impurity(y):
+PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC_PATH = os.path.join(PROJECT_PATH, "src")
+
+if SRC_PATH not in sys.path:
+    sys.path.append(SRC_PATH)
+
+from preprocess_xgboost import load_processed_data, preprocess_xgboost, read_sas_file
+
+
+def calculate_gini_importance(data, target_col='DFlag', method='xgboost', 
+                              n_estimators=100, max_depth=6, learning_rate=0.1,
+                              subsample=0.8, colsample_bytree=0.8, sample_size=None):
     """
-    Calcule l'impureté de Gini pour une variable cible.
+    Calcule l'importance Gini des caractéristiques en utilisant un modèle d'arbre de décision.
+    Utilise les mêmes paramètres que train_xgboost.py pour garantir la cohérence.
     
     Args:
-        y: Série pandas avec les valeurs de la variable cible
-    
-    Returns:
-        Coefficient de Gini (entre 0 et 1, où 0 = pur, 1 = impur)
-    """
-    if len(y) == 0:
-        return 0.0
-    
-    # Compter les occurrences de chaque classe
-    value_counts = y.value_counts()
-    proportions = value_counts / len(y)
-    
-    # Calculer l'impureté de Gini: 1 - sum(p_i^2)
-    gini = 1 - (proportions ** 2).sum()
-    
-    return gini
-
-def calculate_gini_gain(data, feature_col, target_col='DFlag'):
-    """
-    Calcule le gain de Gini pour une variable par rapport à la variable cible.
-    Le gain de Gini mesure la réduction de l'impureté obtenue en utilisant cette variable.
-    
-    Args:
-        data: DataFrame pandas
-        feature_col: Nom de la colonne de la variable à évaluer
+        data: DataFrame avec les caractéristiques et la variable cible
         target_col: Nom de la colonne cible (par défaut 'DFlag')
+        method: Méthode à utiliser ('xgboost' ou 'decision_tree')
+        n_estimators: Nombre d'arbres pour XGBoost (par défaut 100, comme train_xgboost.py)
+        max_depth: Profondeur maximale des arbres (par défaut 6, comme train_xgboost.py)
+        learning_rate: Taux d'apprentissage (par défaut 0.1, comme train_xgboost.py)
+        subsample: Proportion d'échantillons utilisés (par défaut 0.8, comme train_xgboost.py)
+        colsample_bytree: Proportion de caractéristiques utilisées (par défaut 0.8, comme train_xgboost.py)
+        sample_size: Nombre d'échantillons à utiliser (None = utiliser toutes les données)
     
     Returns:
-        Gain de Gini (plus élevé = meilleure variable)
+        Tuple (DataFrame avec les caractéristiques et leur importance Gini, modèle entraîné)
     """
-    if feature_col not in data.columns or target_col not in data.columns:
-        return 0.0
+    print("="*80)
+    print("CALCUL DE L'IMPORTANCE GINI")
+    print("="*80)
     
-    # Supprimer les valeurs manquantes pour cette variable
-    data_clean = data[[feature_col, target_col]].dropna()
-    
-    if len(data_clean) == 0:
-        return 0.0
-    
-    # Impureté de Gini de la variable cible (avant division)
-    gini_parent = calculate_gini_impurity(data_clean[target_col])
-    
-    # Pour les variables continues, utiliser des seuils
-    # Pour les variables discrètes, calculer directement
-    if data_clean[feature_col].dtype in ['int64', 'int32', 'float64', 'float32']:
-        # Variable numérique: essayer différents seuils
-        unique_values = sorted(data_clean[feature_col].unique())
-        
-        if len(unique_values) <= 1:
-            return 0.0
-        
-        best_gain = 0.0
-        
-        # Essayer des seuils (médiane et quartiles pour efficacité)
-        thresholds = []
-        if len(unique_values) > 10:
-            # Utiliser des quantiles pour les grandes variables
-            thresholds = [
-                data_clean[feature_col].quantile(0.25),
-                data_clean[feature_col].quantile(0.5),
-                data_clean[feature_col].quantile(0.75)
-            ]
-        else:
-            # Utiliser toutes les valeurs uniques pour les petites variables
-            thresholds = unique_values[:-1]  # Exclure la dernière valeur
-        
-        for threshold in thresholds:
-            # Diviser en deux groupes: <= seuil et > seuil
-            left_mask = data_clean[feature_col] <= threshold
-            right_mask = ~left_mask
-            
-            if left_mask.sum() == 0 or right_mask.sum() == 0:
-                continue
-            
-            # Calculer l'impureté de Gini pour chaque groupe
-            gini_left = calculate_gini_impurity(data_clean[left_mask][target_col])
-            gini_right = calculate_gini_impurity(data_clean[right_mask][target_col])
-            
-            # Poids de chaque groupe
-            n_left = left_mask.sum()
-            n_right = right_mask.sum()
-            n_total = len(data_clean)
-            
-            # Impureté de Gini pondérée
-            weighted_gini = (n_left / n_total) * gini_left + (n_right / n_total) * gini_right
-            
-            # Gain de Gini
-            gain = gini_parent - weighted_gini
-            best_gain = max(best_gain, gain)
-        
-        return best_gain
-    else:
-        # Variable catégorielle: calculer directement
-        gini_children = 0.0
-        n_total = len(data_clean)
-        
-        for value in data_clean[feature_col].unique():
-            mask = data_clean[feature_col] == value
-            n_value = mask.sum()
-            
-            if n_value > 0:
-                gini_value = calculate_gini_impurity(data_clean[mask][target_col])
-                gini_children += (n_value / n_total) * gini_value
-        
-        # Gain de Gini
-        gain = gini_parent - gini_children
-        return max(0.0, gain)
-
-def select_features_by_gini(data, target_col='DFlag', min_gini_gain=0.0, top_k=None, save_scores_path=None):
-    """
-    Sélectionne les variables basées sur leur gain de Gini.
-    
-    Args:
-        data: DataFrame pandas
-        target_col: Nom de la colonne cible (par défaut 'DFlag')
-        min_gini_gain: Gain de Gini minimum requis (par défaut 0.0)
-        top_k: Nombre de meilleures variables à garder (None = garder toutes celles qui passent le seuil)
-        save_scores_path: Chemin pour sauvegarder les scores de Gini (None = ne pas sauvegarder)
-    
-    Returns:
-        Tuple (DataFrame avec seulement les variables sélectionnées, DataFrame avec tous les scores de Gini)
-    """
     if target_col not in data.columns:
-        print(f"Attention: La colonne cible '{target_col}' n'est pas présente")
-        return data, pd.DataFrame()
+        raise ValueError(f"La colonne cible '{target_col}' est absente des données!")
     
-    print(f"\nSélection de variables basée sur le coefficient de Gini...")
-    print(f"  Colonnes initiales: {len(data.columns)}")
+    feature_columns = [col for col in data.columns if col != target_col]
+    X = data[feature_columns].copy()
+    y = data[target_col].copy()
     
-    # Calculer le gain de Gini pour chaque variable
-    feature_cols = [col for col in data.columns if col != target_col]
-    gini_gains = {}
+    if sample_size is not None and len(data) > sample_size:
+        print(f"  Échantillonnage : utilisation de {sample_size} lignes sur {len(data)}")
+        sample_indices = np.random.choice(len(data), size=sample_size, replace=False)
+        X = X.iloc[sample_indices]
+        y = y.iloc[sample_indices]
     
-    print(f"  Calcul des scores de Gini pour {len(feature_cols)} variables...")
-    for i, col in enumerate(feature_cols, 1):
-        if i % 5 == 0 or i == len(feature_cols):
-            print(f"    Progression: {i}/{len(feature_cols)} variables traitées...")
-        gain = calculate_gini_gain(data, col, target_col)
-        gini_gains[col] = gain
+    print(f"  Nombre de caractéristiques : {len(feature_columns)}")
+    print(f"  Nombre d'échantillons : {len(X)}")
+    print(f"  Méthode : {method}")
+    print()
     
-    # Créer un DataFrame avec les résultats
-    gini_df = pd.DataFrame({
-        'feature': list(gini_gains.keys()),
-        'gini_gain': list(gini_gains.values())
-    }).sort_values('gini_gain', ascending=False)
+    # Entraîner le modèle selon la méthode choisie
+    if method == 'xgboost':
+        print("  Entraînement d'un modèle XGBoost pour calculer l'importance Gini...")
+        model = xgb.XGBClassifier(
+            objective='binary:logistic',
+            eval_metric='logloss',
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            learning_rate=learning_rate,
+            subsample=subsample,
+            colsample_bytree=colsample_bytree,
+            random_state=42,
+            n_jobs=-1,
+            tree_method='hist'
+        )
+        model.fit(X, y, verbose=False)
+        
+        importances = model.feature_importances_
+        
+    elif method == 'decision_tree':
+        print("  Entraînement d'un arbre de décision pour calculer l'importance Gini...")
+        model = DecisionTreeClassifier(
+            max_depth=max_depth,
+            random_state=42,
+            criterion='gini'
+        )
+        model.fit(X, y)
+        importances = model.feature_importances_
     
-    print(f"\n  Top 10 des variables par gain de Gini:")
-    print(gini_df.head(10).to_string(index=False))
-    
-    # Sauvegarder les scores si un chemin est fourni
-    if save_scores_path is not None:
-        os.makedirs(os.path.dirname(save_scores_path), exist_ok=True)
-        gini_df.to_csv(save_scores_path, index=False)
-        print(f"\n  Scores de Gini sauvegardés : {save_scores_path}")
-    
-    # Sélectionner les variables
-    if top_k is not None:
-        selected_features = gini_df.head(top_k)['feature'].tolist()
-        print(f"\n  Sélection des {top_k} meilleures variables")
     else:
-        selected_features = gini_df[gini_df['gini_gain'] >= min_gini_gain]['feature'].tolist()
-        print(f"\n  Sélection des variables avec gain de Gini >= {min_gini_gain}")
+        raise ValueError(f"Méthode non reconnue : {method}. Utilisez 'xgboost' ou 'decision_tree'")
     
-    # Toujours inclure la variable cible
-    selected_features.append(target_col)
+    # Créer un DataFrame avec les importances
+    importance_df = pd.DataFrame({
+        'feature': feature_columns,
+        'gini_importance': importances
+    }).sort_values('gini_importance', ascending=False)
     
-    print(f"  Colonnes sélectionnées: {len(selected_features)}")
+    print(f"  Calcul terminé!")
+    print()
+    print("  Top 10 caractéristiques par importance Gini :")
+    print(importance_df.head(10).to_string(index=False))
+    print()
     
-    return data[selected_features], gini_df
+    return importance_df, model
 
-def load_gini_scores(project_path, window="FM12", segment="green"):
+
+def select_features_by_gini(data, target_col='DFlag', method='xgboost',
+                            threshold=None, top_k=None, 
+                            n_estimators=100, max_depth=6, learning_rate=0.1,
+                            subsample=0.8, colsample_bytree=0.8, sample_size=None):
     """
-    Charge les scores de Gini sauvegardés pour une fenêtre et un segment donnés.
+    Sélectionne les caractéristiques basées sur l'importance Gini.
+    
+    Args:
+        data: DataFrame avec les caractéristiques et la variable cible
+        target_col: Nom de la colonne cible (par défaut 'DFlag')
+        method: Méthode à utiliser ('xgboost' ou 'decision_tree')
+        threshold: Seuil d'importance minimum (entre 0 et 1). Si None, utilise top_k
+        top_k: Nombre de caractéristiques à conserver (utilisé si threshold est None)
+        n_estimators: Nombre d'arbres pour XGBoost
+        max_depth: Profondeur maximale des arbres
+        learning_rate: Taux d'apprentissage
+        subsample: Proportion d'échantillons utilisés
+        colsample_bytree: Proportion de caractéristiques utilisées
+        sample_size: Nombre d'échantillons à utiliser pour le calcul (None = toutes les données)
+    
+    Returns:
+        Tuple (DataFrame avec seulement les caractéristiques sélectionnées + la variable cible, 
+               DataFrame d'importance des caractéristiques)
+    """
+    print("="*80)
+    print("SÉLECTION DE CARACTÉRISTIQUES PAR GINI")
+    print("="*80)
+    
+    if target_col not in data.columns:
+        raise ValueError(f"La colonne cible '{target_col}' est absente des données!")
+    
+    # Calculer l'importance Gini
+    importance_df, model = calculate_gini_importance(
+        data, target_col=target_col, method=method,
+        n_estimators=n_estimators, max_depth=max_depth,
+        learning_rate=learning_rate, subsample=subsample,
+        colsample_bytree=colsample_bytree, sample_size=sample_size
+    )
+    
+    # Sélectionner les caractéristiques selon le critère
+    if threshold is not None:
+        selected_features = importance_df[importance_df['gini_importance'] >= threshold]['feature'].tolist()
+        print(f"  Sélection par seuil (>= {threshold}) : {len(selected_features)} caractéristiques sélectionnées")
+    elif top_k is not None:
+        selected_features = importance_df.head(top_k)['feature'].tolist()
+        print(f"  Sélection des top {top_k} : {len(selected_features)} caractéristiques sélectionnées")
+    else:
+        selected_features = importance_df[importance_df['gini_importance'] > 0]['feature'].tolist()
+        print(f"  Sélection par défaut (importance > 0) : {len(selected_features)} caractéristiques sélectionnées")
+    
+    print()
+    print("  Caractéristiques sélectionnées :")
+    for i, feat in enumerate(selected_features[:20], 1):
+        importance = importance_df[importance_df['feature'] == feat]['gini_importance'].values[0]
+        print(f"    {i}. {feat} (importance: {importance:.6f})")
+    if len(selected_features) > 20:
+        print(f"    ... et {len(selected_features) - 20} autres")
+    print()
+    
+    # Créer le DataFrame avec seulement les caractéristiques sélectionnées
+    selected_data = data[[target_col] + selected_features].copy()
+    
+    print(f"  Forme initiale : {data.shape}")
+    print(f"  Forme après sélection : {selected_data.shape}")
+    print(f"  Réduction : {data.shape[1] - selected_data.shape[1]} caractéristiques supprimées")
+    print()
+    
+    return selected_data, importance_df
+
+
+def apply_gini_selection_to_files(project_path, window="FM12", segments=["green", "red"],
+                                  splits=["train", "OOS", "OOT", "OOU"],
+                                  method='xgboost', threshold=None, top_k=None,
+                                  n_estimators=100, max_depth=6, learning_rate=0.1,
+                                  subsample=0.8, colsample_bytree=0.8, sample_size=50000):
+    """
+    Applique le prétraitement et la sélection Gini à tous les fichiers de données brutes.
+    Les données prétraitées avec sélection Gini sont sauvegardées dans data/processed/.
     
     Args:
         project_path: Chemin du projet
         window: Fenêtre temporelle (ex: "FM12")
-        segment: Segment (ex: "green" ou "red")
-    
-    Returns:
-        DataFrame avec les scores de Gini, ou None si le fichier n'existe pas
+        segments: Liste des segments (ex: ["green", "red"])
+        splits: Liste des splits (ex: ["train", "OOS", "OOT", "OOU"])
+        method: Méthode à utiliser ('xgboost' ou 'decision_tree')
+        threshold: Seuil d'importance minimum
+        top_k: Nombre de caractéristiques à conserver
+        n_estimators: Nombre d'arbres pour XGBoost
+        max_depth: Profondeur maximale des arbres
+        learning_rate: Taux d'apprentissage
+        subsample: Proportion d'échantillons utilisés
+        colsample_bytree: Proportion de caractéristiques utilisées
+        sample_size: Nombre d'échantillons à utiliser pour calculer l'importance (sur les données d'entraînement)
     """
-    gini_scores_path = os.path.join(project_path, "outputs", "gini_scores", window, segment, f"gini_scores_{window}.csv")
+    print("="*80)
+    print("PRÉTRAITEMENT ET SÉLECTION GINI")
+    print("="*80)
     
-    if os.path.exists(gini_scores_path):
-        gini_scores = pd.read_csv(gini_scores_path)
-        print(f"Scores de Gini chargés depuis : {gini_scores_path}")
-        return gini_scores
-    else:
-        print(f"Fichier de scores de Gini introuvable : {gini_scores_path}")
-        return None
+    # 1. Charger et prétraiter les données d'entraînement brutes pour calculer l'importance
+    print("\n1. Chargement et prétraitement des données d'entraînement brutes...")
+    print(f"  Source : data/raw/{window}/[green,red]/train_{window[2:]}.csv")
+    
+    # Charger les données d'entraînement brutes
+    train_chunks = []
+    chunk_size = 50000
+    
+    for segment in segments:
+        filename = f"train_{window[2:]}.csv"
+        raw_path = os.path.join(project_path, "data", "raw", window, segment, filename)
+        
+        if os.path.exists(raw_path):
+            print(f"  Lecture de {raw_path}...")
+            for chunk in pd.read_csv(raw_path, chunksize=chunk_size, low_memory=False):
+                chunk_processed = preprocess_xgboost(chunk, target_col='DFlag')
+                train_chunks.append(chunk_processed)
+        else:
+            print(f"  Fichier introuvable : {raw_path}")
+    
+    if not train_chunks:
+        raise ValueError(f"Aucune donnée d'entraînement brute trouvée pour {window}!")
+    
+    print(f"  Concaténation de {len(train_chunks)} chunks...")
+    train_data = pd.concat(train_chunks, ignore_index=True)
+    print(f"  Données d'entraînement prétraitées : {train_data.shape}")
+    print()
+    
+    print("2. Calcul de l'importance Gini sur les données d'entraînement prétraitées...")
+    
+    selected_train, importance_df = select_features_by_gini(
+        train_data, target_col='DFlag', method=method,
+        threshold=threshold, top_k=top_k,
+        n_estimators=n_estimators, max_depth=max_depth, 
+        learning_rate=learning_rate, subsample=subsample, 
+        colsample_bytree=colsample_bytree, sample_size=sample_size
+    )
+    
+    selected_features = [col for col in selected_train.columns if col != 'DFlag']
+    
+    print("\n3. Prétraitement et sélection Gini sur tous les fichiers bruts...")
+    
+    for segment in segments:
+        for split in splits:
+            if split == "OOU":
+                raw_filename = f"{split}.sas7bdat"
+            else:
+                raw_filename = f"{split}_{window[2:]}.csv"
+            
+            raw_path = os.path.join(project_path, "data", "raw", window, segment, raw_filename)
+            output_dir = os.path.join(project_path, "data", "processed", window, segment)
+            os.makedirs(output_dir, exist_ok=True)
+            
+            output_filename = f"{split}_{window[2:]}.csv"
+            output_path = os.path.join(output_dir, output_filename)
+            
+            if os.path.exists(raw_path):
+                print(f"\n  Traitement : {raw_path}")
+                
+                try:
+                    chunk_size = 50000
+                    first_chunk = True
+                    total_rows = 0
+                    
+                    # Lire le fichier brut (SAS ou CSV)
+                    if split == "OOU":
+                        print(f"    Lecture du fichier SAS OOU par chunks...")
+                        try:
+                            chunk_generator = read_sas_file(raw_path, chunk_size=chunk_size)
+                            
+                            chunk_num = 0
+                            for chunk_df in chunk_generator:
+                                chunk_processed = preprocess_xgboost(chunk_df, target_col='DFlag')
+                                chunk_selected = chunk_processed[['DFlag'] + selected_features].copy()
+                                
+                                if first_chunk:
+                                    chunk_selected.to_csv(output_path, index=False, mode='w', header=True)
+                                    first_chunk = False
+                                else:
+                                    chunk_selected.to_csv(output_path, index=False, mode='a', header=False)
+                                
+                                total_rows += len(chunk_selected)
+                                chunk_num += 1
+                                if chunk_num % 10 == 0:
+                                    print(f"      Chunks traités : {chunk_num} ({total_rows:,} lignes)...")
+                            
+                            print(f"      Total : {chunk_num} chunks, {total_rows:,} lignes")
+                                        
+                        except MemoryError:
+                            print(f"    Erreur mémoire lors de la lecture du fichier SAS")
+                            print(f"    Le fichier est peut-être trop volumineux pour la mémoire disponible")
+                            print(f"    Suggestion : Réduire chunk_size ou augmenter la RAM")
+                            raise
+                        except Exception as e:
+                            print(f"    Erreur lors de la lecture du fichier SAS : {str(e)}")
+                            import traceback
+                            traceback.print_exc()
+                            raise
+                    else:
+                        for chunk in pd.read_csv(raw_path, chunksize=chunk_size, low_memory=False):
+                            chunk_processed = preprocess_xgboost(chunk, target_col='DFlag')
+                            chunk_selected = chunk_processed[['DFlag'] + selected_features].copy()
+                            
+                            if first_chunk:
+                                chunk_selected.to_csv(output_path, index=False, mode='w', header=True)
+                                first_chunk = False
+                            else:
+                                chunk_selected.to_csv(output_path, index=False, mode='a', header=False)
+                            
+                            total_rows += len(chunk_selected)
+                    
+                    print(f"    Sauvegardé : {output_path} ({total_rows} lignes)")
+                    
+                except Exception as e:
+                    print(f"    Erreur : {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"  Fichier introuvable : {raw_path}")
+    
+    # Sauvegarder aussi le DataFrame d'importance
+    importance_path = os.path.join(project_path, "data", "processed", window, "gini_importance.csv")
+    os.makedirs(os.path.dirname(importance_path), exist_ok=True)
+    importance_df.to_csv(importance_path, index=False)
+    print(f"\n  Importance Gini sauvegardée : {importance_path}")
+    
+    print("\n" + "="*80)
+    print("SÉLECTION GINI TERMINÉE")
+    print("="*80)
+
+
+if __name__ == "__main__":
+    # Exemple d'utilisation
+    # Sélectionner les top 20 caractéristiques basées sur l'importance Gini
+    apply_gini_selection_to_files(
+        project_path=PROJECT_PATH,
+        window="FM12",
+        segments=["green", "red"],
+        splits=["train", "OOS", "OOT", "OOU"],
+        method='xgboost',
+        top_k=20,  # Garder les 20 caractéristiques les plus importantes
+        n_estimators=100,
+        max_depth=6,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        sample_size=50000  # Utiliser 50000 échantillons pour calculer l'importance
+    )
 

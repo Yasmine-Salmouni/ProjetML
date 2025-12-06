@@ -1,0 +1,51 @@
+"""
+Script pour exécuter le prétraitement des données pour XGBoost
+Inclut la sélection de caractéristiques basée sur l'impureté de Gini
+"""
+
+import os
+import sys
+
+# Ajouter le dossier src au path
+PROJECT_PATH = os.getcwd()
+SRC_PATH = os.path.join(PROJECT_PATH, "src")
+
+if SRC_PATH not in sys.path:
+    sys.path.append(SRC_PATH)
+
+from preprocess_xgboost import process_and_save_all
+from gini_selection import apply_gini_selection_to_files
+
+if __name__ == "__main__":
+    print("="*80)
+    print("PRÉTRAITEMENT DES DONNÉES POUR XGBOOST")
+    print("="*80)
+    print(f"Chemin du projet : {PROJECT_PATH}")
+    print()
+    
+    print("PRÉTRAITEMENT AVEC SÉLECTION GINI")
+    print("="*80)
+    print("Les données brutes seront prétraitées et la sélection Gini sera appliquée.")
+    print("Les résultats seront sauvegardés dans data/processed/")
+    print()
+    
+    apply_gini_selection_to_files(
+        project_path=PROJECT_PATH,
+        window="FM12",
+        segments=["green", "red"],
+        splits=["train", "OOS", "OOT", "OOU"],
+        method='xgboost',
+        top_k=20,
+        n_estimators=100,
+        max_depth=6,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        sample_size=50000
+    )
+    
+    print("\n" + "="*80)
+    print("PRÉTRAITEMENT ET SÉLECTION GINI TERMINÉS")
+    print("="*80)
+    print("\nFichiers prétraités avec sélection Gini : data/processed/FM12/")
+    print("="*80)

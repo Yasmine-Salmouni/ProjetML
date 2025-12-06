@@ -22,7 +22,7 @@ SRC_PATH = os.path.join(PROJECT_PATH, "src")
 if SRC_PATH not in sys.path:
     sys.path.append(SRC_PATH)
 
-def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], test_split="OOS"):
+def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], test_split="OOS", use_gini_selection=False):
     """
     Teste le modèle XGBoost sur les données de test (OOS, OOT, ou OOU).
     
@@ -31,6 +31,8 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
         window: Fenêtre temporelle (ex: "FM12")
         segments: Liste des segments à fusionner (ex: ["green", "red"])
         test_split: Type de données de test ("OOS", "OOT", ou "OOU")
+        use_gini_selection: Si True, utilise les données avec sélection Gini (data/processed_gini/)
+                          Si False, utilise les données complètes (data/processed/)
     
     Returns:
         Dictionnaire avec les métriques de performance
@@ -42,6 +44,7 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
     print(f"Fenêtre : {window}")
     print(f"Segments : {segments}")
     print(f"Split de test : {test_split}")
+    print(f"Sélection Gini : {'Activée' if use_gini_selection else 'Désactivée'}")
     print()
     
     # 1. Charger le modèle entraîné
@@ -62,25 +65,29 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
     print(f"  Modèle chargé : {model_path}")
     print()
     
-    # 2. Charger les données de test prétraitées par chunks
+    data_dir = "processed_gini" if use_gini_selection else "processed"
     print(f"2. Chargement des données de test {test_split} prétraitées par chunks...")
-    print(f"  Source : data/processed/{window}/[green,red]/{test_split}_{window[2:]}.csv")
+    print(f"  Source : data/{data_dir}/{window}/[green,red]/{test_split}_{window[2:]}.csv")
     
-    # Trouver les fichiers à charger
     files_to_load = []
     for segment in segments:
         filename = f"{test_split}_{window[2:]}.csv"
-        file_path = os.path.join(project_path, "data", "processed", window, segment, filename)
+        file_path = os.path.join(project_path, "data", data_dir, window, segment, filename)
         if os.path.exists(file_path):
             files_to_load.append(file_path)
     
     if not files_to_load:
-        raise ValueError(
-            f"Aucune donnée de test {test_split} trouvée dans data/processed/{window}/!\n"
-            f"Assurez-vous d'avoir exécuté le prétraitement avec run_preprocessing.py"
-        )
+        if use_gini_selection:
+            raise ValueError(
+                f"Aucune donnée de test {test_split} trouvée dans data/{data_dir}/{window}/!\n"
+                f"Assurez-vous d'avoir exécuté le prétraitement avec sélection Gini (run_preprocessing.py)"
+            )
+        else:
+            raise ValueError(
+                f"Aucune donnée de test {test_split} trouvée dans data/{data_dir}/{window}/!\n"
+                f"Assurez-vous d'avoir exécuté le prétraitement avec run_preprocessing.py"
+            )
     
-    # Lire le premier chunk pour obtenir les colonnes
     print("  Lecture du premier chunk pour identifier la structure...")
     chunk_size = 10000
     first_chunk = pd.read_csv(files_to_load[0], nrows=chunk_size, engine='python')
@@ -92,12 +99,9 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
     print(f"  Features identifiées : {len(feature_columns)} colonnes")
     print()
     
-    # 3. Faire des prédictions par chunks (SANS montrer y_test au modèle)
-    print("3. Prédictions du modèle par chunks (sans montrer les réponses)...")
-    print("  Le modèle ne voit que X_test, pas y_test")
+    print("3. Prédictions du modèle par chunks...")
     print()
     
-    # Stocker toutes les prédictions et les vraies valeurs
     all_y_test = []
     all_y_pred = []
     all_y_pred_proba = []
@@ -108,15 +112,12 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
         chunk_count = 0
         
         for chunk in pd.read_csv(file_path, chunksize=chunk_size, engine='python'):
-            # Séparer X et y
             X_chunk = chunk[feature_columns]
-            y_chunk = chunk['DFlag']  # La vraie réponse (on ne la montre PAS au modèle)
+            y_chunk = chunk['DFlag']
             
-            # Faire des prédictions sur ce chunk
             y_pred_chunk = model.predict(X_chunk)
             y_pred_proba_chunk = model.predict_proba(X_chunk)[:, 1]
             
-            # Stocker les résultats
             all_y_test.extend(y_chunk.values)
             all_y_pred.extend(y_pred_chunk)
             all_y_pred_proba.extend(y_pred_proba_chunk)
@@ -130,7 +131,6 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
         print(f"  Fichier terminé : {chunk_count} chunks, {total_rows} lignes")
         print()
     
-    # Convertir en arrays numpy pour les calculs
     y_test = np.array(all_y_test)
     y_pred = np.array(all_y_pred)
     y_pred_proba = np.array(all_y_pred_proba)
@@ -138,20 +138,16 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
     print(f"  Prédictions effectuées : {len(y_pred)} prédictions au total")
     print()
     
-    # 4. Afficher la distribution de DFlag
     print("4. Distribution de DFlag dans les données de test :")
     print(f"    - 0 (pas de défaut) : {(y_test == 0).sum()} ({((y_test == 0).sum() / len(y_test) * 100):.2f}%)")
     print(f"    - 1 (défaut) : {(y_test == 1).sum()} ({((y_test == 1).sum() / len(y_test) * 100):.2f}%)")
     print()
     
-    # 5. Comparer les prédictions avec la réalité
     print("5. Comparaison des prédictions avec la réalité...")
     print(f"  Total de prédictions : {len(y_pred)}")
     
-    # Calculer les métriques
     accuracy = accuracy_score(y_test, y_pred)
     
-    # Calculer AUC-ROC si possible
     try:
         auc_roc = roc_auc_score(y_test, y_pred_proba)
     except ValueError:
@@ -163,12 +159,10 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
         print(f"  AUC-ROC : {auc_roc:.4f}")
     print()
     
-    # 6. Rapport de classification détaillé
     print("6. Rapport de classification détaillé :")
     print(classification_report(y_test, y_pred, target_names=['Pas de défaut', 'Défaut']))
     print()
     
-    # 7. Matrice de confusion
     print("7. Matrice de confusion :")
     cm = confusion_matrix(y_test, y_pred)
     print(cm)
@@ -178,7 +172,6 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
     print("    [Faux Négatifs]   [Vrais Positifs]")
     print()
     
-    # 8. Sauvegarder les résultats
     print("8. Sauvegarde des résultats...")
     results_dir = os.path.join(project_path, "outputs", "evaluation")
     os.makedirs(results_dir, exist_ok=True)
@@ -204,7 +197,6 @@ def test_xgboost_model(project_path, window="FM12", segments=["green", "red"], t
     print(f"TEST TERMINÉ")
     print("="*80)
     
-    # Retourner les métriques
     return {
         'accuracy': accuracy,
         'auc_roc': auc_roc,
@@ -242,4 +234,3 @@ if __name__ == "__main__":
         segments=["green", "red"],
         test_split=args.test_split
     )
-

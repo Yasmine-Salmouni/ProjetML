@@ -18,7 +18,7 @@ if SRC_PATH not in sys.path:
 
 from preprocess_xgboost import load_processed_data
 
-def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
+def train_xgboost_model(project_path, window="FM12", segments=["green", "red"], use_gini_selection=False):
     """
     Entraîne un modèle XGBoost sur les données d'entraînement.
     
@@ -26,6 +26,8 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
         project_path: Chemin du projet
         window: Fenêtre temporelle (ex: "FM12")
         segments: Liste des segments à fusionner (ex: ["green", "red"])
+        use_gini_selection: Si True, utilise les données avec sélection Gini (data/processed_gini/)
+                          Si False, utilise les données complètes (data/processed/)
     
     Returns:
         Modèle XGBoost entraîné
@@ -36,28 +38,33 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     print(f"Chemin du projet : {project_path}")
     print(f"Fenêtre : {window}")
     print(f"Segments : {segments}")
+    print(f"Sélection Gini : {'Activée' if use_gini_selection else 'Désactivée'}")
     print()
     
-    # 1. Charger les données d'entraînement par chunks (pour éviter les problèmes de mémoire)
+    data_dir = "processed_gini" if use_gini_selection else "processed"
     print("1. Chargement des données d'entraînement prétraitées par chunks...")
-    print(f"  Source : data/processed/{window}/[green,red]/train_{window[2:]}.csv")
+    print(f"  Source : data/{data_dir}/{window}/[green,red]/train_{window[2:]}.csv")
     
-    # Trouver les fichiers à charger
     import os
     files_to_load = []
     for segment in segments:
         filename = f"train_{window[2:]}.csv"
-        file_path = os.path.join(project_path, "data", "processed", window, segment, filename)
+        file_path = os.path.join(project_path, "data", data_dir, window, segment, filename)
         if os.path.exists(file_path):
             files_to_load.append(file_path)
     
     if not files_to_load:
-        raise ValueError(
-            f"Aucune donnée d'entraînement trouvée dans data/processed/{window}/!\n"
-            f"Assurez-vous d'avoir exécuté le prétraitement avec run_preprocessing_gini.py"
-        )
+        if use_gini_selection:
+            raise ValueError(
+                f"Aucune donnée d'entraînement trouvée dans data/{data_dir}/{window}/!\n"
+                f"Assurez-vous d'avoir exécuté le prétraitement avec sélection Gini (run_preprocessing.py)"
+            )
+        else:
+            raise ValueError(
+                f"Aucune donnée d'entraînement trouvée dans data/{data_dir}/{window}/!\n"
+                f"Assurez-vous d'avoir exécuté le prétraitement avec run_preprocessing.py"
+            )
     
-    # Lire le premier chunk pour obtenir les colonnes
     print("  Lecture du premier chunk pour identifier la structure...")
     chunk_size = 10000
     first_chunk = pd.read_csv(files_to_load[0], nrows=chunk_size, engine='python')
@@ -69,7 +76,6 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     print(f"  Features identifiées : {len(feature_columns)} colonnes")
     print()
     
-    # 2. Créer le modèle XGBoost
     print("2. Création du modèle XGBoost...")
     
     model = xgb.XGBClassifier(
@@ -92,40 +98,32 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     print(f"    - Taux d'apprentissage : {model.learning_rate}")
     print()
     
-    # 3. Accumuler les chunks progressivement et entraîner
     print("3. Accumulation des chunks et entraînement du modèle...")
-    print("  Cette méthode accumule les chunks progressivement pour éviter les problèmes de mémoire")
     print()
     
     total_rows = 0
     total_chunks = 0
     accumulated_chunks = []
-    max_chunks_in_memory = 5  # Garder maximum 5 chunks en mémoire à la fois
+    max_chunks_in_memory = 5
     
     for file_path in files_to_load:
         print(f"  Traitement du fichier : {os.path.basename(file_path)}")
         chunk_count = 0
         
         for chunk in pd.read_csv(file_path, chunksize=chunk_size, engine='python'):
-            # Ajouter le chunk à l'accumulation
             accumulated_chunks.append(chunk)
             total_rows += len(chunk)
             total_chunks += 1
             chunk_count += 1
             
-            # Quand on a assez de chunks, entraîner et libérer la mémoire
             if len(accumulated_chunks) >= max_chunks_in_memory:
-                # Concaténer les chunks accumulés
                 batch_df = pd.concat(accumulated_chunks, ignore_index=True)
                 X_batch = batch_df[feature_columns]
                 y_batch = batch_df['DFlag']
                 
-                # Entraîner sur ce batch
                 if total_chunks == len(accumulated_chunks):
-                    # Premier batch : initialiser le modèle
                     model.fit(X_batch, y_batch, verbose=False)
                 else:
-                    # Batches suivants : continuer l'entraînement
                     model.fit(
                         X_batch, 
                         y_batch,
@@ -133,7 +131,6 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
                         verbose=False
                     )
                 
-                # Libérer la mémoire
                 accumulated_chunks = []
                 
                 if chunk_count % 10 == 0:
@@ -142,7 +139,6 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
         print(f"  Fichier terminé : {chunk_count} chunks, {total_rows} lignes")
         print()
     
-    # Entraîner sur les chunks restants s'il y en a
     if accumulated_chunks:
         batch_df = pd.concat(accumulated_chunks, ignore_index=True)
         X_batch = batch_df[feature_columns]
@@ -157,7 +153,6 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     print(f"  Entraînement terminé : {total_chunks} chunks, {total_rows} lignes au total")
     print()
     
-    # 4. Calculer la distribution de DFlag (en relisant un échantillon)
     print("4. Analyse de la distribution des classes...")
     sample_size = min(100000, total_rows)
     sample_chunks = []
@@ -180,11 +175,8 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     print("  Modèle entraîné avec succès!")
     print()
     
-    # 5. Évaluer le modèle sur un échantillon des données d'entraînement
     print("5. Évaluation du modèle sur un échantillon des données d'entraînement...")
-    print("  (Évaluation sur échantillon pour économiser la mémoire)")
     
-    # Utiliser l'échantillon déjà chargé
     X_sample = sample_df[feature_columns]
     y_sample = sample_df['DFlag']
     
@@ -201,7 +193,6 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     print(confusion_matrix(y_sample, y_pred_sample))
     print()
     
-    # 6. Sauvegarder le modèle
     print("6. Sauvegarde du modèle...")
     model_dir = os.path.join(project_path, "models")
     os.makedirs(model_dir, exist_ok=True)
@@ -215,7 +206,6 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     print(f"  Modèle sauvegardé : {model_path}")
     print()
     
-    # 7. Afficher l'importance des features
     print("7. Importance des features (top 10) :")
     feature_importance = pd.DataFrame({
         'feature': feature_columns,
@@ -232,10 +222,8 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     return model
 
 if __name__ == "__main__":
-    # Entraîner le modèle
     model = train_xgboost_model(
         project_path=PROJECT_PATH,
         window="FM12",
         segments=["green", "red"]
     )
-

@@ -1,13 +1,5 @@
 """
 Script de prétraitement des données pour XGBoost
-- Pas de scaling/normalization (XGBoost est basé sur des arbres de décision. Il regarde si une valeur est supérieure ou inférieure à un seuil. Que le revenu soit compris entre 0 et 1 ou entre 0 et 1 million ne change rien à la structure de l'arbre.)
-- Pas de remplissage des valeurs manquantes (XGBoost les gère)
-- Pas de suppression des  valeurs aberrantes (les arbres isolent simplement les valeurs extrêmes dans une feuille à part)
-
-- Gestion des dates
-- Suppression des identifiants(colonne Loanref)
-- Conversion du texte en nombres (encodage) (XGBoost ne comprend pas les mots comme "Locataire", "Propriétaire")
-- Vérification de la logique métier (valeurs négatives, data leakage (aucune colonne ne donne la réponse))
 """
 
 import os
@@ -17,6 +9,94 @@ import re
 from sklearn.preprocessing import LabelEncoder
 import warnings
 warnings.filterwarnings('ignore')
+
+
+def read_sas_file(file_path, chunk_size=50000):
+    """
+    Lit un fichier SAS (.sas7bdat) par chunks en utilisant uniquement sas7bdat.
+    Optimisé pour les gros fichiers - lit toujours par chunks pour éviter les problèmes de mémoire.
+    
+    Args:
+        file_path: Chemin vers le fichier SAS
+        chunk_size: Nombre de lignes par chunk (par défaut 50000)
+    
+    Returns:
+        Générateur de DataFrames pandas (un chunk à la fois)
+    
+    Raises:
+        Exception: Si sas7bdat n'est pas installé ou si la lecture échoue
+    """
+    # Vérifier que le fichier existe
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Fichier SAS introuvable : {file_path}")
+    
+    file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+    print(f"  Taille du fichier : {file_size_mb:.2f} MB")
+    print(f"  Lecture par chunks de {chunk_size:,} lignes avec sas7bdat...")
+    
+    try:
+        from sas7bdat import SAS7BDAT
+        
+        def chunk_generator():
+            with SAS7BDAT(file_path) as reader:
+                chunk = []
+                chunk_count = 0
+                total_rows = 0
+                
+                for row in reader:
+                    chunk.append(row)
+                    total_rows += 1
+                    
+                    if len(chunk) >= chunk_size:
+                        chunk_count += 1
+                        df_chunk = pd.DataFrame(chunk)
+                        if chunk_count % 10 == 0:
+                            print(f"      Chunks lus : {chunk_count} ({total_rows:,} lignes)...")
+                        yield df_chunk
+                        chunk = []
+                
+                if chunk:
+                    chunk_count += 1
+                    df_chunk = pd.DataFrame(chunk)
+                    print(f"      Dernier chunk : {chunk_count} ({total_rows:,} lignes au total)")
+                    yield df_chunk
+        
+        print(f"  Fichier SAS prêt pour lecture par chunks")
+        return chunk_generator()
+            
+    except ImportError:
+        error_msg = (
+            f"\nsas7bdat n'est pas installé !\n"
+            f"   Installer avec : pip install sas7bdat\n"
+            f"   sas7bdat est OBLIGATOIRE pour lire les fichiers SAS\n"
+        )
+        raise ImportError(error_msg)
+    except MemoryError as e:
+        error_msg = (
+            f"\nErreur mémoire lors de la lecture du fichier SAS : {file_path}\n"
+            f"   Taille du fichier : {file_size_mb:.2f} MB\n"
+            f"   Le fichier est peut-être trop volumineux pour la mémoire disponible\n"
+            f"\nSolutions possibles :\n"
+            f"  1. Réduire chunk_size (actuellement {chunk_size:,})\n"
+            f"  2. Augmenter la RAM disponible\n"
+            f"  3. Convertir le fichier SAS en CSV avec un autre outil (SAS, R, etc.)\n"
+        )
+        raise MemoryError(error_msg)
+    except Exception as e:
+        error_msg = (
+            f"\nErreur lors de la lecture du fichier SAS : {file_path}\n"
+            f"   Taille du fichier : {file_size_mb:.2f} MB\n"
+            f"   Erreur : {str(e)}\n"
+            f"   Type : {type(e).__name__}\n"
+            f"\nSolutions possibles :\n"
+            f"  1. Vérifier que le fichier n'est pas corrompu\n"
+            f"  2. Vérifier que sas7bdat est correctement installé : pip install sas7bdat\n"
+            f"  3. Convertir le fichier SAS en CSV avec un autre outil (SAS, R, etc.)\n"
+        )
+        import traceback
+        print(f"\nDétails de l'erreur :")
+        traceback.print_exc()
+        raise Exception(error_msg)
 
 #Gestion des dates
 '''
@@ -96,17 +176,14 @@ def encode_categorical_variables(data, target_col='DFlag'):
     data = data.copy()
     label_encoders = {}
     
-    # Identifier les colonnes catégorielles (object, string, category)
     categorical_cols = data.select_dtypes(include=['object', 'string', 'category']).columns.tolist()
     
-    # Exclure la colonne cible si elle est catégorielle
     if target_col in categorical_cols:
         categorical_cols.remove(target_col)
     
     for col in categorical_cols:
         if col in data.columns:
             le = LabelEncoder()
-            # Remplacer NaN par une chaîne spéciale pour l'encodage
             data[col] = data[col].fillna('__MISSING__')
             data[col] = le.fit_transform(data[col].astype(str))
             label_encoders[col] = le
@@ -129,7 +206,6 @@ def check_business_logic(data):
     
     for col in non_negative_cols:
         if col in data.columns:
-            # Remplacer les valeurs négatives par NaN (XGBoost les gère)
             negative_count = (data[col] < 0).sum()
             if negative_count > 0:
                 print(f"  {col} : {negative_count} valeurs négatives remplacées par NaN")
@@ -142,13 +218,6 @@ def detect_data_leakage(data, target_col='DFlag'):
     """
     Détecte et supprime les colonnes qui causent du data leakage.
     
-    Effectue trois vérifications chirurgicales :
-    1. Purge de la réponse : S'assure que DFlag est présente (variable cible y) mais pas dans X
-    2. Purge de l'identifiant : Confirme que Loanref a bien été retiré
-    3. Scan statistique : Détecte les variables avec corrélation >99% avec DFlag (suspect)
-    
-    Note : DFlag reste dans le DataFrame final car c'est la variable cible (y).
-    
     Args:
         data: DataFrame à vérifier (doit contenir DFlag)
         target_col: Nom de la colonne cible (par défaut 'DFlag')
@@ -159,30 +228,23 @@ def detect_data_leakage(data, target_col='DFlag'):
     data = data.copy()
     leakage_cols = []
     
-    # 1. Vérification : S'assurer que DFlag est présente
     if target_col not in data.columns:
         print(f"  Attention : La colonne cible '{target_col}' n'est pas présente dans les données")
-        return data  # Retourner les données telles quelles si DFlag est absente
+        return data
     
-    # 2. Purge de l'identifiant : Confirmer que Loanref a bien été retiré
     if 'Loanref' in data.columns:
         leakage_cols.append('Loanref')
         print(f"  Loanref détecté (devrait avoir été supprimé précédemment) - suppression")
     
-    # 3. Scan statistique : Détecter les variables avec corrélation suspecte avec DFlag
-    # Calculer les corrélations avec la variable cible DFlag
     numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
     
-    # Exclure DFlag du calcul de corrélation (on ne calcule pas la corrélation de DFlag avec elle-même)
     if target_col in numeric_cols:
         numeric_cols.remove(target_col)
     
     if len(numeric_cols) > 0 and len(data) > 0:
         try:
-            # Calculer les corrélations avec DFlag
             correlations = data[numeric_cols + [target_col]].corr()[target_col]
             
-            # Identifier les colonnes avec corrélation > 99% avec DFlag (suspect)
             for col in numeric_cols:
                 if col in correlations.index:
                     corr_value = abs(correlations[col])
@@ -192,7 +254,6 @@ def detect_data_leakage(data, target_col='DFlag'):
         except Exception as e:
             print(f"  Attention : Impossible de calculer les corrélations : {str(e)}")
     
-    # Supprimer les colonnes détectées (mais JAMAIS DFlag qui est la variable cible)
     cols_to_remove = [col for col in leakage_cols if col != target_col]
     
     if cols_to_remove:
@@ -201,7 +262,6 @@ def detect_data_leakage(data, target_col='DFlag'):
     else:
         print("  Aucune colonne suspecte de data leakage détectée")
     
-    # DFlag est conservée dans le DataFrame (c'est la variable cible y)
     return data
 
 
@@ -245,41 +305,31 @@ def preprocess_xgboost(data, target_col='DFlag'):
     # 1. Gérer les dates AVANT de supprimer les IDs (car Loanref est utilisé pour créer la date)
     print("\n1. Traitement des dates...")
     if 'Loanref' in data.columns:
-        # Créer la colonne de date à partir de Loanref
         print("  Extraction de la date depuis Loanref...")
         data['Origination_date'] = data['Loanref'].apply(yyqq_to_date)
-        # Extraire les features numériques de la date
         data = extract_date_features(data, date_col='Origination_date')
         print("  Features de date créées : Origination_date_year, Origination_date_month, Origination_date_quarter")
     
-    # 2. Supprimer les identifiants (IDs) - inclut Loanref qui a déjà été utilisé
     print("\n2. Suppression des identifiants...")
-    # Exclure aucune colonne car Loanref doit être supprimé maintenant
     data = remove_id_columns(data)
     
-    # 3. Détecter et supprimer le data leakage
     print("\n3. Détection du data leakage...")
     data = detect_data_leakage(data, target_col=target_col)
     
-    # Vérifier s'il y a d'autres colonnes de date (après suppression des IDs)
     date_cols = data.select_dtypes(include=['datetime64']).columns.tolist()
     for date_col in date_cols:
         if date_col != target_col:
             data = extract_date_features(data, date_col=date_col)
     
-    # 4. Encoder les variables catégorielles
     print("\n4. Encodage des variables catégorielles...")
     data, label_encoders = encode_categorical_variables(data, target_col=target_col)
     
-    # 5. Vérifier la logique métier
     print("\n5. Vérification de la logique métier...")
     data = check_business_logic(data)
     
-    # 6. Convertir en types numériques appropriés
     print("\n6. Conversion en types numériques...")
     data = convert_to_numeric(data, target_col=target_col)
     
-    # 7. Normaliser les colonnes CLoan_to_value et OLoan_to_value si elles sont en pourcentage
     if 'CLoan_to_value' in data.columns:
         # Si les valeurs sont > 1, elles sont probablement en pourcentage
         max_val = data['CLoan_to_value'].max()
@@ -293,7 +343,7 @@ def preprocess_xgboost(data, target_col='DFlag'):
             data['OLoan_to_value'] = data['OLoan_to_value'] / 100.0
             print("  OLoan_to_value : valeurs divisées par 100")
     
-    print(f"\n✅ Prétraitement terminé. Forme finale : {data.shape}")
+    print(f"\nPrétraitement terminé. Forme finale : {data.shape}")
     print(f"  Colonnes : {list(data.columns)}")
     
     return data
@@ -328,17 +378,44 @@ def process_and_save_all(project_path, windows=["FM12"], segments=["green", "red
                     try:
                         # Lire le fichier
                         if split == "OOU":
-                            # Essayer de lire le fichier SAS
-                            try:
-                                df = pd.read_sas(raw_path, encoding="utf-8")
-                            except Exception as e:
-                                # Si pandas.read_sas ne fonctionne pas, essayer pyreadstat
-                                try:
-                                    import pyreadstat
-                                    df, meta = pyreadstat.read_sas7bdat(raw_path)
-                                except ImportError:
-                                    print(f"  Impossible de lire le fichier SAS. Installez pyreadstat: pip install pyreadstat")
-                                    raise e
+                            # Lire le fichier SAS par chunks (comme les fichiers CSV)
+                            print(f"  Lecture du fichier SAS par chunks...")
+                            
+                            # Créer le dossier de destination
+                            save_dir = os.path.join(project_path, "data", "processed", window, segment)
+                            os.makedirs(save_dir, exist_ok=True)
+                            
+                            # Nom du fichier de sortie
+                            save_filename = f"{split}_{window[2:]}.csv"
+                            save_path = os.path.join(save_dir, save_filename)
+                            
+                            # Lire et traiter par chunks
+                            chunk_size = 50000
+                            chunk_generator = read_sas_file(raw_path, chunk_size=chunk_size)
+                            
+                            first_chunk = True
+                            chunk_num = 1
+                            total_rows = 0
+                            
+                            for chunk in chunk_generator:
+                                print(f"  Traitement du chunk {chunk_num} ({len(chunk)} lignes)...")
+                                
+                                # Prétraiter le chunk
+                                chunk_processed = preprocess_xgboost(chunk, target_col='DFlag')
+                                
+                                # Sauvegarder (avec en-tête seulement pour le premier chunk)
+                                if first_chunk:
+                                    chunk_processed.to_csv(save_path, index=False, mode='w', header=True)
+                                    first_chunk = False
+                                    print(f"  Chunk {chunk_num} traité et sauvegardé avec en-tête")
+                                else:
+                                    chunk_processed.to_csv(save_path, index=False, mode='a', header=False)
+                                    print(f"  Chunk {chunk_num} traité et ajouté au fichier")
+                                
+                                total_rows += len(chunk_processed)
+                                chunk_num += 1
+                            
+                            print(f"\n  Sauvegardé : {save_path} ({total_rows:,} lignes au total)")
                         else:
                             # Lire par chunks pour gérer les gros fichiers
                             print("  Lecture par chunks (fichier volumineux)...")
@@ -349,11 +426,7 @@ def process_and_save_all(project_path, windows=["FM12"], segments=["green", "red
                             os.makedirs(save_dir, exist_ok=True)
                             
                             # Nom du fichier de sortie
-                            if split == "OOU":
-                                save_filename = f"{split}_{window[2:]}.csv"
-                            else:
-                                save_filename = f"{split}_{window[2:]}.csv"
-                            
+                            save_filename = f"{split}_{window[2:]}.csv"
                             save_path = os.path.join(save_dir, save_filename)
                             
                             # Lire et traiter par chunks
@@ -449,4 +522,3 @@ def load_processed_data(project_path, windows=["FM12"], segments=["green", "red"
         return pd.concat(dataframes, ignore_index=True)
     else:
         return pd.DataFrame()
-
