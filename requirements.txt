@@ -10,4 +10,4 @@ jupytext
 nbstripout
 ydata-profiling
 xgboost
-sas7bdat
+pyreadstat

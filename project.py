@@ -52,15 +52,15 @@ from preprocess import *
 # ## Prétraitement des données
 
 # %%
-process_and_save_all(PROJECT_PATH, windows=["FM12", "FM36", "FM60"], segments=["red"])
+process_and_save_all(PROJECT_PATH, windows=["FM12"], segments=["red"])
 
 # %% [markdown]
 # ## Importation des données prétraitées
 
 # %%
-data_train = load_processed_data(PROJECT_PATH, windows=["FM12", "FM36", "FM60"], segments=['red'], splits=["train"])
+data_train = load_processed_data(PROJECT_PATH, windows=["FM12"], segments=['red'], splits=["train"])
 X_train, y_train = data_train.drop(columns=['DFlag']),data_train['DFlag']
-data_test = load_processed_data(PROJECT_PATH, windows=["FM12", "FM36", "FM60"], segments=['red'], splits=["OOS"])
+data_test = load_processed_data(PROJECT_PATH, windows=["FM12"], segments=['red'], splits=["OOS"])
 X_test, y_test = data_test.drop(columns=['DFlag']), data_test['DFlag']
 
 # %% [markdown]
@@ -69,8 +69,7 @@ X_test, y_test = data_test.drop(columns=['DFlag']), data_test['DFlag']
 # %%
 from explore_data import *
 
-# Générer les rapports pour chaque fenêtre
-for window in ["FM12", "FM36", "FM60"]:
-    save_path = os.path.join(PROJECT_PATH, "outputs", "exploration", f"rapport_{window}.html")
-    data_to_explore = load_processed_data(PROJECT_PATH, windows=[window], segments=['red'])
-    summarize_data_to_html(data_to_explore, f"{window} - Rapport", save_path)
+save_path = os.path.join(PROJECT_PATH, "outputs", "exploration", "rapport_FM12.html")
+
+data_to_explore = load_processed_data(PROJECT_PATH, windows=["FM12"], segments=['red'])
+summarize_data_to_html(data_to_explore, "FM12 - Rapport", save_path)

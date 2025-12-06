@@ -54,7 +54,7 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     if not files_to_load:
         raise ValueError(
             f"Aucune donnée d'entraînement trouvée dans data/processed/{window}/!\n"
-            f"Assurez-vous d'avoir exécuté le prétraitement avec run_preprocessing.py"
+            f"Assurez-vous d'avoir exécuté le prétraitement avec run_preprocessing_gini.py"
         )
     
     # Lire le premier chunk pour obtenir les colonnes
@@ -232,16 +232,10 @@ def train_xgboost_model(project_path, window="FM12", segments=["green", "red"]):
     return model
 
 if __name__ == "__main__":
-    # Entraîner les modèles pour FM12, FM36 et FM60
-    windows = ["FM12", "FM36", "FM60"]
-    
-    for window in windows:
-        print(f"\n{'='*80}")
-        print(f"ENTRAÎNEMENT DU MODÈLE POUR {window}")
-        print(f"{'='*80}\n")
-        model = train_xgboost_model(
-            project_path=PROJECT_PATH,
-            window=window,
-            segments=["green", "red"]
-        )
+    # Entraîner le modèle
+    model = train_xgboost_model(
+        project_path=PROJECT_PATH,
+        window="FM12",
+        segments=["green", "red"]
+    )
 
